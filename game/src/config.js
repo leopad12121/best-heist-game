@@ -16,14 +16,22 @@ export const THIEF = {
 
 export const GUARD = {
   radius: 14,
-  /** Patrol speeds, one per patrolling guard: slow, fast, steady. */
-  speeds: [58, 92, 72],
+  /** Patrol speeds, one per patrolling guard: slow, fast, steady, rookie. */
+  speeds: [58, 92, 72, 52],
   /** How far a guard can see, in pixels. */
   sight: 225,
   /** Half of the vision cone's angle, in radians. */
   halfCone: 0.61,
   /** Inside this distance a guard spots the thief whatever way it faces. */
   bump: 46,
+};
+
+/** The rookie: the fourth guard, new on the job — slower, shorter-sighted and
+ *  narrower-eyed than the veterans, but its beat runs straight across the upper
+ *  hall, right under the vault door. */
+export const ROOKIE = {
+  sight: 200,
+  halfCone: 0.55,
 };
 
 /** The guard dog: fast, keen-nosed, short-sighted but wide-eyed. It cannot see
@@ -34,6 +42,16 @@ export const DOG = {
   sight: 135,
   halfCone: 1.1,
   /** The dog smells the thief inside this distance, cone or no cone. */
+  bump: 62,
+};
+
+/** The pup: a second guard dog, younger and a touch slower, working the right
+ *  gallery's upper loop — same nose, same wide cone, a different beat. */
+export const DOG2 = {
+  radius: 11,
+  speed: 120,
+  sight: 135,
+  halfCone: 1.1,
   bump: 62,
 };
 
@@ -66,6 +84,8 @@ export const LOOT_ITEMS = [
   { name: 'Pearl Necklace', x: 1080, y: 200, value: 25, color: '#f0e6ff' },
   { name: 'Ruby Brooch', x: 170, y: 200, value: 35, color: '#f87171' },
   { name: 'Ancient Vase', x: 1110, y: 300, value: 30, color: '#fbbf24' },
+  { name: 'Emerald Tiara', x: 380, y: 150, value: 45, color: '#34d399' },
+  { name: 'Silver Dagger', x: 900, y: 120, value: 20, color: '#cbd5e1' },
 ];
 
 /** The Security Keycard, kept in the guard office in the left gallery — up in the

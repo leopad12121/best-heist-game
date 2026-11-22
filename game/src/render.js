@@ -250,7 +250,8 @@ export function createRenderer(canvas) {
         context.stroke();
         text('LOOKOUT', guard.x, guard.y - 26, 11, PALETTE.lookout, 'center');
       }
-      if (guard.dog) text('DOG', guard.x, guard.y - 24, 11, PALETTE.dog, 'center');
+      if (guard.dog) text(guard.pup ? 'PUP' : 'DOG', guard.x, guard.y - 24, 11, PALETTE.dog, 'center');
+      if (guard.rookie) text('ROOKIE', guard.x, guard.y - 24, 11, '#fca5a5', 'center');
       // An investigating guard is on the hunt: a "!" over its head.
       if (guard.investigateTime > 0) {
         text('!', guard.x, guard.y - (guard.dog ? 40 : 22), 20, '#fbbf24', 'center');
@@ -479,7 +480,7 @@ export function createRenderer(canvas) {
     let objective;
     if (state.crack) objective = 'CRACKING — SPACE in the gold zone!';
     else if (!state.keycard) objective = 'Find the KEYCARD in the left gallery';
-    else if (!state.gemTaken) objective = `Loot the galleries ${takenPieces}/5 · then crack the vault`;
+    else if (!state.gemTaken) objective = `Loot the galleries ${takenPieces}/${state.lootItems.length} · then crack the vault`;
     else objective = 'GETAWAY! Reach the green EXIT!';
     text(objective, 1240, 36, 16, state.gemTaken ? PALETTE.gold : PALETTE.text, 'right');
     // The heist checklist, top right under the objective.
@@ -520,10 +521,10 @@ export function createRenderer(canvas) {
   }
 
   const TITLE_LINES = [
-    'One museum. Three guards, a guard dog, a lookout, three cameras, a laser grid.',
+    'One museum. Four guards, two guard dogs, a lookout, three cameras, a laser grid.',
     'Move with WASD or arrows. Read the cones before you move.',
     'First the KEYCARD in the left gallery — the vault case stays locked without it.',
-    'Loot the galleries — Idol $60 · Mask $40 · Brooch $35 · Vase $30 · Necklace $25 — then crack the vault.',
+    'Loot the galleries — Idol $60 · Tiara $45 · Mask $40 · Brooch $35 · Vase $30 · Necklace $25 · Dagger $20 — then crack the vault.',
     'Crack the case: SPACE in the gold zone, three tumblers. Then RUN for the EXIT.',
     'Tools: 1 Smoke ($15) · 2 EMP ($25) · 3 Disguise ($40) · 4 Decoy ($20).',
     'Spotted? A guard breaks off to investigate where it last saw you.',

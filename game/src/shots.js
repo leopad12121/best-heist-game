@@ -5,7 +5,7 @@
 // and how much closer it gets to its target (the nearest coin, then the sapphire, then
 // the exit), and takes the best. The same seed always gives the same frame.
 
-import { CAMERA, CRACK, EXIT, FIELD, GUARD, KEYCARD, LASERS, LOOKOUT, STEP, TOOLS } from './config.js';
+import { ALARM, CAMERA, CRACK, EXIT, FIELD, GUARD, KEYCARD, LASERS, LOOKOUT, STEP, TOOLS } from './config.js';
 import { COVER, EVENT_CAUGHT, EVENT_WIN, GEM, SOLIDS, laserY } from './world.js';
 import { SCREEN_CAUGHT, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WIN } from './render.js';
 
@@ -160,6 +160,9 @@ const NAV_POINTS = [
   { x: 820, y: 260 },
   { x: 460, y: 580 },
   { x: 820, y: 580 },
+  // Junctions by the two new loot pieces, in the upper galleries.
+  { x: 380, y: 150 },
+  { x: 900, y: 120 },
 ];
 
 /** True when the straight line between two points stays clear of every solid,
@@ -184,7 +187,7 @@ const NAV_LINKS = NAV_POINTS.map((point, index) => {
 
 /**
  * The point to steer for: the target itself when the way is open, else the next
- * waypoint on the shortest route through the waypoint graph (breadth-first).
+ * waypoint on the shortest route through the waypoint graph (by distance).
  */
 function routeTarget(state, target) {
   if (segmentClear(state.thief.x, state.thief.y, target.x, target.y)) return target;
@@ -210,16 +213,32 @@ function routeTarget(state, target) {
     }
   }
   if (start < 0 || goal < 0) return target;
+  if (goal === start) return NAV_POINTS[goal];
+  // Shortest route by distance, not by hop count: a hop-count search prefers
+  // the long diagonal shortcut under the vault, whose first hop flips whenever
+  // the nearest waypoint changes — the thief then walks back and forth instead
+  // of crossing the hall. Distance-weighted routing keeps the first hop
+  // pointing the same way from either side of a waypoint boundary.
+  const dist = new Array(NAV_POINTS.length).fill(Infinity);
   const previous = new Array(NAV_POINTS.length).fill(-1);
-  const queue = [start];
-  previous[start] = start;
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (current === goal) break;
+  const done = new Array(NAV_POINTS.length).fill(false);
+  dist[start] = 0;
+  for (;;) {
+    let current = -1;
+    let best = Infinity;
+    for (let index = 0; index < NAV_POINTS.length; index += 1) {
+      if (!done[index] && dist[index] < best) {
+        best = dist[index];
+        current = index;
+      }
+    }
+    if (current < 0 || current === goal) break;
+    done[current] = true;
     for (const next of NAV_LINKS[current]) {
-      if (previous[next] < 0) {
+      const step = Math.hypot(NAV_POINTS[next].x - NAV_POINTS[current].x, NAV_POINTS[next].y - NAV_POINTS[current].y);
+      if (dist[current] + step < dist[next]) {
+        dist[next] = dist[current] + step;
         previous[next] = current;
-        queue.push(next);
       }
     }
   }
@@ -292,6 +311,9 @@ function autopilot(state, options = {}) {
   // the meter and the smoke in the play scene.
   const patienceAlarm = bold ? 55 : PATIENCE_ALARM;
   // Hot alarm, eyes on the thief: back out of the cone, not deeper into it.
+  // A landing spot hemmed in on most sides is a trap, not an escape: a corner
+  // reads as safe right now because nothing can see into it, but it is where
+  // an investigating guard corners the thief, so it counts against the move.
   if (state.alarm > patienceAlarm && dangerAt(state, thief.x, thief.y) > 0) {
     let bestDirection = DIRECTIONS[8];
     let bestDanger = dangerAt(state, thief.x, thief.y);
@@ -299,7 +321,14 @@ function autopilot(state, options = {}) {
       const length = Math.hypot(direction.x, direction.y) || 1;
       const x = thief.x + (direction.x / length) * 205 * LOOKAHEAD;
       const y = thief.y + (direction.y / length) * 205 * LOOKAHEAD;
-      const danger = dangerAt(state, x, y) + (blockedAt(x, y) ? 5000 : 0);
+      let trapped = 0;
+      for (const probe of DIRECTIONS) {
+        if (probe === DIRECTIONS[8]) continue;
+        const px = x + (probe.x / (Math.hypot(probe.x, probe.y) || 1)) * 45;
+        const py = y + (probe.y / (Math.hypot(probe.x, probe.y) || 1)) * 45;
+        if (blockedAt(px, py)) trapped += 1;
+      }
+      const danger = dangerAt(state, x, y) + (blockedAt(x, y) ? 5000 : 0) + Math.max(0, trapped - 3) * 1000;
       if (danger < bestDanger) {
         bestDanger = danger;
         bestDirection = direction;
@@ -307,9 +336,15 @@ function autopilot(state, options = {}) {
     }
     return { direction: bestDirection, tool: state.coinsHeld >= TOOLS.smoke.cost && state.smoke <= 0 ? 'smoke' : null };
   }
-  // Hot alarm, safely hidden: wait for the meter to fall before moving on.
+  // Hot alarm, safely hidden: wait for the meter to fall before moving on —
+  // unless a guard is on the hunt, or the meter is already full. Standing still
+  // while one closes in on the last-seen spot is how a thief gets cornered,
+  // and at full alarm the grace timer is already running, so keep moving
+  // instead and let the target logic below steer for the goal while dodging
+  // the cones.
   if (state.alarm > patienceAlarm) {
-    return { direction: DIRECTIONS[8], tool: null };
+    const hunted = state.guards.some((guard) => guard.investigateTime > 0);
+    if (!hunted && state.alarm < ALARM.max) return { direction: DIRECTIONS[8], tool: null };
   }
   // The vault door is watched whenever a guard's cone covers it: wait on the carpet
   // at the staging point until the cone sweeps away — or spend the coins on a
@@ -386,16 +421,21 @@ export function stageShot(name, world) {
   const mode = name === 'end' ? { tour: true, bold: false } : { tour: true, bold: true };
   const keepPeak = name === 'play';
   let outcome = 0;
-  // The play scene keeps the moment the alarm ran highest, so the frame shows the
-  // heist at its tensest instead of wherever the tour happened to end.
-  let peakAlarm = -1;
+  // The play scene keeps the most dramatic moment: the alarm at its highest,
+  // weighted by the loot already pocketed, so the frame shows a real mid-heist
+  // (a high alarm with nothing stolen yet is just the first seconds) — the
+  // getaway, sapphire in hand, usually wins.
+  let peakScore = -1;
   let peakSnap = null;
   for (let index = 0; index < limit / STEP; index += 1) {
     const move = autopilot(world.state, mode);
     outcome = world.step(STEP, move.direction.x, move.direction.y, move.tool, false, move.crack);
-    if (keepPeak && world.state.alarm > peakAlarm) {
-      peakAlarm = world.state.alarm;
-      peakSnap = snapshotState(world.state);
+    if (keepPeak) {
+      const score = world.state.alarm + world.state.loot / 2;
+      if (score > peakScore) {
+        peakScore = score;
+        peakSnap = snapshotState(world.state);
+      }
     }
     if (outcome & (EVENT_WIN | EVENT_CAUGHT)) break;
   }

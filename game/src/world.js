@@ -7,7 +7,7 @@
 // the vault (top centre): the left gallery, the central hall past the statue, and the
 // right gallery. Display cases and planters are cover: they block movement and sight.
 
-import { ALARM, CAMERA, COIN_VALUE, CRACK, DOG, ESCAPE, EXIT, FIELD, GUARD, INVESTIGATE, KEYCARD, LASERS, LOOKOUT, LOOT_ITEMS, START_COINS, THIEF, TOOLS } from './config.js';
+import { ALARM, CAMERA, COIN_VALUE, CRACK, DOG, DOG2, ESCAPE, EXIT, FIELD, GUARD, INVESTIGATE, KEYCARD, LASERS, LOOKOUT, LOOT_ITEMS, ROOKIE, START_COINS, THIEF, TOOLS } from './config.js';
 
 export const EVENT_SPOTTED = 1;
 export const EVENT_CAUGHT = 2;
@@ -85,11 +85,20 @@ const GUARD_ROUTES = [
   [{ x: 1140, y: 300 }, { x: 1140, y: 620 }, { x: 940, y: 620 }, { x: 940, y: 300 }],
   // Central hall guard, sweeping past the statue.
   [{ x: 480, y: 260 }, { x: 800, y: 260 }, { x: 800, y: 600 }, { x: 480, y: 600 }],
+  // The rookie's beat: straight across the upper hall, under the vault door.
+  [{ x: 200, y: 240 }, { x: 1080, y: 240 }],
 ];
 
 // The guard dog's beat: a fast loop around the lower central hall, below the lasers.
 const DOG_ROUTE = [
   { x: 480, y: 600 }, { x: 800, y: 600 }, { x: 800, y: 540 }, { x: 480, y: 540 },
+];
+
+// The pup's beat: a loop around the middle of the right gallery, between the
+// upper prizes and the lower ones — it guards the crossing, not the prizes
+// themselves, so the thief can still time a grab at the necklace and the vase.
+const DOG2_ROUTE = [
+  { x: 920, y: 370 }, { x: 1160, y: 370 }, { x: 1160, y: 450 }, { x: 920, y: 450 },
 ];
 
 const CAMERA_SPOTS = [
@@ -178,11 +187,14 @@ export function createWorld(random) {
     speed: GUARD.speeds[index] ?? GUARD.speeds[0],
     facing: index === 2 ? 0 : Math.PI / 2,
     radius: GUARD.radius,
-    sight: GUARD.sight,
-    halfCone: GUARD.halfCone,
+    // The rookie sees less far and through a narrower cone than the veterans.
+    sight: index === 3 ? ROOKIE.sight : GUARD.sight,
+    halfCone: index === 3 ? ROOKIE.halfCone : GUARD.halfCone,
     bump: GUARD.bump,
     lookout: false,
     dog: false,
+    pup: false,
+    rookie: index === 3,
     investigateX: 0,
     investigateY: 0,
     investigateTime: 0,
@@ -201,6 +213,8 @@ export function createWorld(random) {
     bump: GUARD.bump,
     lookout: true,
     dog: false,
+    pup: false,
+    rookie: false,
     investigateX: 0,
     investigateY: 0,
     investigateTime: 0,
@@ -220,6 +234,28 @@ export function createWorld(random) {
     bump: DOG.bump,
     lookout: false,
     dog: true,
+    pup: false,
+    rookie: false,
+    investigateX: 0,
+    investigateY: 0,
+    investigateTime: 0,
+  });
+  // The pup: a second guard dog, working the right gallery's upper loop.
+  guards.push({
+    x: DOG2_ROUTE[0].x,
+    y: DOG2_ROUTE[0].y,
+    leg: 0,
+    route: DOG2_ROUTE,
+    speed: DOG2.speed,
+    facing: 0,
+    radius: DOG2.radius,
+    sight: DOG2.sight,
+    halfCone: DOG2.halfCone,
+    bump: DOG2.bump,
+    lookout: false,
+    dog: true,
+    pup: true,
+    rookie: false,
     investigateX: 0,
     investigateY: 0,
     investigateTime: 0,
@@ -267,7 +303,7 @@ export function createWorld(random) {
     thief.y = THIEF.startY;
     for (let index = 0; index < guards.length; index += 1) {
       const guard = guards[index];
-      const start = guard.dog ? DOG_ROUTE[0] : guard.lookout ? { x: LOOKOUT.x, y: LOOKOUT.y } : GUARD_ROUTES[index][0];
+      const start = guard.lookout ? { x: LOOKOUT.x, y: LOOKOUT.y } : guard.route[0];
       guard.x = start.x;
       guard.y = start.y;
       guard.leg = 0;
@@ -498,7 +534,7 @@ export function createWorld(random) {
       const disguised = state.disguise > 0 && !close;
       if (!disguised && canSee(guard.x, guard.y, guard.facing, guard.sight, guard.halfCone, guard.bump)) {
         seen = true;
-        seenBy = guard.lookout ? 'Lookout' : guard.dog ? 'Guard dog' : `Guard ${index + 1}`;
+        seenBy = guard.lookout ? 'Lookout' : guard.pup ? 'Guard pup' : guard.dog ? 'Guard dog' : `Guard ${index + 1}`;
         break;
       }
     }
