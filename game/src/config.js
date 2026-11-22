@@ -16,13 +16,60 @@ export const THIEF = {
 
 export const GUARD = {
   radius: 14,
-  speed: 72,
+  /** Patrol speeds, one per patrolling guard: slow, fast, steady. */
+  speeds: [58, 92, 72],
   /** How far a guard can see, in pixels. */
   sight: 225,
   /** Half of the vision cone's angle, in radians. */
   halfCone: 0.61,
   /** Inside this distance a guard spots the thief whatever way it faces. */
   bump: 46,
+};
+
+/** The stationary lookout by the vault door: never walks, slowly turns a full
+ *  circle, and sees further than a patrolling guard. */
+export const LOOKOUT = {
+  x: 820,
+  y: 260,
+  radius: 14,
+  sight: 220,
+  halfCone: 0.5,
+  /** Radians per second the lookout turns. */
+  turnSpeed: 0.55,
+};
+
+/** Extra loot beyond the coins and the sapphire: different values, different
+ *  galleries, so the run is a route choice, not a straight line. */
+export const LOOT_ITEMS = [
+  { name: 'Gold Idol', x: 170, y: 620, value: 60, color: '#f2c94c' },
+  { name: 'Jade Mask', x: 1110, y: 620, value: 40, color: '#4ade80' },
+  { name: 'Pearl Necklace', x: 1080, y: 200, value: 25, color: '#f0e6ff' },
+];
+
+/** The laser grid across the central hall: two beams that sweep up and down.
+ *  Crossing a beam trips the alarm hard. */
+export const LASERS = [
+  { x1: 448, x2: 832, baseY: 430, amplitude: 55, speed: 0.5, phase: 0 },
+  { x1: 448, x2: 832, baseY: 480, amplitude: 55, speed: 0.65, phase: Math.PI },
+];
+
+/** The vault-cracking minigame on the sapphire case: the needle sweeps the dial,
+ *  press Space or click while it is in the gold zone to land a tumbler. */
+export const CRACK = {
+  hitsNeeded: 3,
+  /** Needle speed across the dial, in dial-widths per second. */
+  markerSpeed: 1.15,
+  /** Width of the gold zone, as a fraction of the dial. */
+  zoneWidth: 0.22,
+  /** Alarm points added when the pick slips outside the zone. */
+  slipPenalty: 25,
+};
+
+/** Once the sapphire is out of its case the museum heats up: the alarm climbs
+ *  on its own and the guards hurry. */
+export const ESCAPE = {
+  heatRise: 5,
+  guardHaste: 1.45,
 };
 
 export const CAMERA = {
@@ -79,6 +126,12 @@ export const PALETTE = {
   cameraConeEdge: 'rgba(242, 201, 76, 0.5)',
   cameraOff: '#5a5f6e',
   gem: '#7fe7ff',
+  laser: '#ff3b5c',
+  laserGlow: 'rgba(255, 59, 92, 0.22)',
+  lookout: '#c084fc',
+  gold: '#f2c94c',
+  jade: '#4ade80',
+  pearl: '#f0e6ff',
   coin: '#f2c94c',
   exit: '#3fbf6f',
   alarmLow: '#3fbf6f',

@@ -10,7 +10,7 @@
 
 import { BEST_KEY, STEP } from './config.js';
 import { createRandom } from './random.js';
-import { createWorld, EVENT_CAUGHT, EVENT_COIN, EVENT_GEM, EVENT_SPOTTED, EVENT_WIN } from './world.js';
+import { createWorld, EVENT_CAUGHT, EVENT_COIN, EVENT_CRACK, EVENT_GEM, EVENT_LOOT, EVENT_SPOTTED, EVENT_WIN } from './world.js';
 import { ACTION_CONFIRM, ACTION_PAUSE, createInput } from './input.js';
 import { createRenderer, SCREEN_CAUGHT, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WIN, TOOL_BUTTONS } from './render.js';
 import { stageShot } from './shots.js';
@@ -74,7 +74,7 @@ function runGame() {
     selectedTool = 'smoke';
     accumulator = 0;
     screen = SCREEN_PLAY;
-    announce('Playing. Steal the Starlight Sapphire, then reach the exit.');
+    announce('Playing. Loot the galleries, crack the vault, then reach the exit.');
   }
 
   function endGame(won) {
@@ -88,7 +88,8 @@ function runGame() {
       : `Caught. Loot $${world.state.loot}. Best $${best}.`);
   }
 
-  /** A click: a tool button picks and uses that tool, anywhere else uses the picked tool. */
+  /** A click: while cracking it works the pick; a tool button picks and uses
+   *  that tool; anywhere else uses the picked tool. */
   function handleClicks() {
     for (const click of input.takeClicks()) {
       if (screen === SCREEN_TITLE || screen === SCREEN_CAUGHT || screen === SCREEN_WIN) {
@@ -96,6 +97,10 @@ function runGame() {
         return;
       }
       if (screen !== SCREEN_PLAY) return;
+      if (world.state.crack) {
+        world.crackAttempt();
+        return;
+      }
       const point = renderer.toLogical(click.x, click.y);
       let used = false;
       for (const button of TOOL_BUTTONS) {
@@ -115,6 +120,7 @@ function runGame() {
     for (const tool of input.takeTools()) selectedTool = tool;
     if (actions & ACTION_CONFIRM) {
       if (screen === SCREEN_TITLE || screen === SCREEN_CAUGHT || screen === SCREEN_WIN) startGame();
+      else if (screen === SCREEN_PLAY && world.state.crack) world.crackAttempt();
       else if (screen === SCREEN_PLAY) world.useTool(selectedTool);
       else if (screen === SCREEN_PAUSED) screen = SCREEN_PLAY;
     }
@@ -131,15 +137,17 @@ function runGame() {
 
   function step() {
     if (screen === SCREEN_TITLE) {
-      world.step(STEP, 0, 0, null, true);
+      world.step(STEP, 0, 0, null, true, false);
       return;
     }
     const direction = input.direction();
-    const events = world.step(STEP, direction.x, direction.y, null, false);
+    const events = world.step(STEP, direction.x, direction.y, null, false, false);
     if (events & EVENT_WIN) endGame(true);
     else if (events & EVENT_CAUGHT) endGame(false);
     else if (events & EVENT_SPOTTED) announce(`Spotted by ${world.state.seenBy}! Break line of sight!`);
-    else if (events & EVENT_GEM) announce('Sapphire secured! Reach the exit!');
+    else if (events & EVENT_CRACK) announce(world.state.message);
+    else if (events & EVENT_GEM) announce('Sapphire secured! Reach the exit — the alarm is climbing!');
+    else if (events & EVENT_LOOT) announce(world.state.message);
     else if (events & EVENT_COIN) announce(`Coin. $${world.state.loot} loot.`);
   }
 

@@ -7,7 +7,7 @@
 // the vault (top centre): the left gallery, the central hall past the statue, and the
 // right gallery. Display cases and planters are cover: they block movement and sight.
 
-import { ALARM, CAMERA, COIN_VALUE, EXIT, FIELD, GUARD, START_COINS, THIEF, TOOLS } from './config.js';
+import { ALARM, CAMERA, COIN_VALUE, CRACK, ESCAPE, EXIT, FIELD, GUARD, LASERS, LOOKOUT, LOOT_ITEMS, START_COINS, THIEF, TOOLS } from './config.js';
 
 export const EVENT_SPOTTED = 1;
 export const EVENT_CAUGHT = 2;
@@ -15,6 +15,8 @@ export const EVENT_COIN = 4;
 export const EVENT_GEM = 8;
 export const EVENT_WIN = 16;
 export const EVENT_TOOL = 32;
+export const EVENT_LOOT = 64;
+export const EVENT_CRACK = 128;
 
 const WALL = 24;
 
@@ -56,6 +58,13 @@ export const COVER = [
 const ALL_SOLIDS = SOLIDS.concat(COVER);
 
 export const GEM = { x: 640, y: 118, radius: 18 };
+
+/** The laser beams' height right now: a sine sweep, so the same elapsed time
+ *  always gives the same beam. */
+export function laserY(index, elapsed) {
+  const beam = LASERS[index];
+  return beam.baseY + Math.sin(elapsed * beam.speed + beam.phase) * beam.amplitude;
+}
 
 const COIN_SPOTS = [
   { x: 120, y: 120 },
@@ -150,16 +159,30 @@ function angleDiff(a, b) {
   return Math.abs(d);
 }
 
-export function createWorld() {
+export function createWorld(random) {
+  const rng = random ?? Math.random;
   const thief = { x: THIEF.startX, y: THIEF.startY, radius: THIEF.radius };
   const guards = GUARD_ROUTES.map((route, index) => ({
     x: route[0].x,
     y: route[0].y,
     leg: 0,
     route,
+    speed: GUARD.speeds[index] ?? GUARD.speeds[0],
     facing: index === 2 ? 0 : Math.PI / 2,
     radius: GUARD.radius,
+    lookout: false,
   }));
+  // The lookout never walks: it stands by the vault door and turns slowly.
+  guards.push({
+    x: LOOKOUT.x,
+    y: LOOKOUT.y,
+    leg: 0,
+    route: [{ x: LOOKOUT.x, y: LOOKOUT.y }],
+    speed: 0,
+    facing: Math.PI / 2,
+    radius: LOOKOUT.radius,
+    lookout: true,
+  });
   const cameras = CAMERA_SPOTS.map((spot) => ({
     x: spot.x,
     y: spot.y,
@@ -169,12 +192,15 @@ export function createWorld() {
     phase: spot.x < FIELD.width / 2 ? 0 : Math.PI,
   }));
   const coins = COIN_SPOTS.map((spot) => ({ x: spot.x, y: spot.y, taken: false }));
+  const loot = LOOT_ITEMS.map((item) => ({ ...item, taken: false }));
   const state = {
     thief,
     guards,
     cameras,
     coins,
+    lootItems: loot,
     gemTaken: false,
+    crack: null,
     coinsHeld: START_COINS,
     loot: 0,
     alarm: 0,
@@ -195,8 +221,8 @@ export function createWorld() {
     thief.x = THIEF.startX;
     thief.y = THIEF.startY;
     for (let index = 0; index < guards.length; index += 1) {
-      guards[index].x = GUARD_ROUTES[index][0].x;
-      guards[index].y = GUARD_ROUTES[index][0].y;
+      guards[index].x = GUARD_ROUTES[index]?.[0]?.x ?? LOOKOUT.x;
+      guards[index].y = GUARD_ROUTES[index]?.[0]?.y ?? LOOKOUT.y;
       guards[index].leg = 0;
       guards[index].facing = index === 2 ? 0 : Math.PI / 2;
     }
@@ -206,7 +232,9 @@ export function createWorld() {
       camera.phase = camera.x < FIELD.width / 2 ? 0 : Math.PI;
     }
     for (const coin of coins) coin.taken = false;
+    for (const item of loot) item.taken = false;
     state.gemTaken = false;
+    state.crack = null;
     state.coinsHeld = START_COINS;
     state.loot = 0;
     state.alarm = 0;
@@ -274,12 +302,59 @@ export function createWorld() {
     return EVENT_TOOL;
   }
 
+  /** True when the thief is standing in a live laser beam right now. */
+  function laserHit() {
+    for (let index = 0; index < LASERS.length; index += 1) {
+      const beam = LASERS[index];
+      if (thief.x > beam.x1 && thief.x < beam.x2 && Math.abs(thief.y - laserY(index, state.elapsed)) < 10) return true;
+    }
+    return false;
+  }
+
+  /** Start cracking the sapphire case: three tumblers, one gold zone each. */
+  function newCrack() {
+    const zoneStart = 0.15 + rng() * 0.6;
+    return { hits: 0, marker: 0, dir: 1, zoneStart, zoneEnd: zoneStart + CRACK.zoneWidth };
+  }
+
+  /** One press of Space or click while cracking: land a tumbler or slip. */
+  function crackAttempt() {
+    const crack = state.crack;
+    if (!crack) return 0;
+    if (crack.marker >= crack.zoneStart && crack.marker <= crack.zoneEnd) {
+      crack.hits += 1;
+      if (crack.hits >= CRACK.hitsNeeded) {
+        state.crack = null;
+        state.gemTaken = true;
+        state.loot += 100;
+        state.message = 'The case clicks open — sapphire secured!';
+        state.messageTime = 2;
+        return EVENT_GEM;
+      }
+      const zoneStart = 0.15 + rng() * 0.6;
+      crack.zoneStart = zoneStart;
+      crack.zoneEnd = zoneStart + CRACK.zoneWidth;
+      crack.marker = 0;
+      crack.dir = 1;
+      state.message = `Tumbler ${crack.hits} of ${CRACK.hitsNeeded} falls.`;
+      state.messageTime = 1.4;
+      return EVENT_CRACK;
+    }
+    state.alarm = Math.min(ALARM.max, state.alarm + CRACK.slipPenalty);
+    crack.marker = 0;
+    crack.dir = 1;
+    state.message = 'The pick slips — the case rattles!';
+    state.messageTime = 1.6;
+    return EVENT_CRACK;
+  }
+
   /**
    * One fixed step. `dx` and `dy` are the thief's movement for this step, `tool` names a
-   * tool to use this step or is null. With `harmless` set (the title screen's backdrop)
-   * the patrols move but nothing is spotted and nothing scores.
+   * tool to use this step or is null, and `crack` presses the pick while cracking.
+   * With `harmless` set (the title screen's backdrop) the patrols move but nothing is
+   * spotted and nothing scores.
    */
-  function step(dt, dx, dy, tool, harmless) {
+  function step(dt, dx, dy, tool, harmless, crack) {
     let events = 0;
     state.elapsed += dt;
     if (state.messageTime > 0) state.messageTime = Math.max(0, state.messageTime - dt);
@@ -288,18 +363,34 @@ export function createWorld() {
     if (state.disguise > 0) state.disguise = Math.max(0, state.disguise - dt);
 
     if (tool && !harmless) events |= useTool(tool);
+    if (crack && state.crack && !harmless) events |= crackAttempt();
 
-    // The thief moves.
-    const length = Math.hypot(dx, dy);
-    if (length > 0) moveThief((dx / length) * THIEF.speed * dt, (dy / length) * THIEF.speed * dt);
+    // The cracking needle sweeps its dial while the thief works the case.
+    if (state.crack) {
+      state.crack.marker += state.crack.dir * CRACK.markerSpeed * dt;
+      if (state.crack.marker >= 1) { state.crack.marker = 1; state.crack.dir = -1; }
+      if (state.crack.marker <= 0) { state.crack.marker = 0; state.crack.dir = 1; }
+    }
 
-    // Guards walk their patrol routes.
+    // The thief moves — unless both hands are on the sapphire case.
+    if (!state.crack) {
+      const length = Math.hypot(dx, dy);
+      if (length > 0) moveThief((dx / length) * THIEF.speed * dt, (dy / length) * THIEF.speed * dt);
+    }
+
+    // Guards walk their patrol routes; the lookout turns on the spot. After the
+    // sapphire is out, every guard hurries.
+    const haste = state.gemTaken ? ESCAPE.guardHaste : 1;
     for (const guard of guards) {
+      if (guard.lookout) {
+        guard.facing = (state.elapsed * LOOKOUT.turnSpeed) % (Math.PI * 2);
+        continue;
+      }
       const target = guard.route[(guard.leg + 1) % guard.route.length];
       const gx = target.x - guard.x;
       const gy = target.y - guard.y;
       const distance = Math.hypot(gx, gy);
-      const stride = GUARD.speed * dt;
+      const stride = guard.speed * haste * dt;
       if (distance <= stride) {
         guard.x = target.x;
         guard.y = target.y;
@@ -326,13 +417,16 @@ export function createWorld() {
     // Who can see the thief?
     let seen = false;
     let seenBy = '';
+    let laser = false;
     for (let index = 0; index < guards.length; index += 1) {
       const guard = guards[index];
       const close = Math.hypot(thief.x - guard.x, thief.y - guard.y) < TOOLS.disguise.closeRange;
       const disguised = state.disguise > 0 && !close;
-      if (!disguised && canSee(guard.x, guard.y, guard.facing, GUARD.sight, GUARD.halfCone, false)) {
+      const sight = guard.lookout ? LOOKOUT.sight : GUARD.sight;
+      const halfCone = guard.lookout ? LOOKOUT.halfCone : GUARD.halfCone;
+      if (!disguised && canSee(guard.x, guard.y, guard.facing, sight, halfCone, false)) {
         seen = true;
-        seenBy = `Guard ${index + 1}`;
+        seenBy = guard.lookout ? 'Lookout' : `Guard ${index + 1}`;
         break;
       }
     }
@@ -347,15 +441,22 @@ export function createWorld() {
         }
       }
     }
+    if (laserHit()) {
+      seen = true;
+      seenBy = 'Laser grid';
+      laser = true;
+    }
 
-    // The alarm meter.
+    // The alarm meter. Lasers trip it twice as fast; after the sapphire is out
+    // the museum heats up on its own.
     if (seen) {
-      state.alarm = Math.min(ALARM.max, state.alarm + ALARM.rise * dt);
+      state.alarm = Math.min(ALARM.max, state.alarm + ALARM.rise * (laser ? 2 : 1) * dt);
       state.seenBy = seenBy;
     } else {
       state.alarm = Math.max(0, state.alarm - ALARM.fall * dt);
       // Keep the last watcher named: the SPOTTED warning still names who saw the thief.
     }
+    if (state.gemTaken) state.alarm = Math.min(ALARM.max, state.alarm + ESCAPE.heatRise * dt);
 
     if (state.alarm >= ALARM.warn && !state.spotted) {
       state.spotted = true;
@@ -371,7 +472,7 @@ export function createWorld() {
       if (state.alarm < ALARM.warn) state.spotted = false;
     }
 
-    // Coins and the gem.
+    // Coins and the gallery loot.
     for (const coin of coins) {
       if (!coin.taken && Math.hypot(thief.x - coin.x, thief.y - coin.y) < thief.radius + 14) {
         coin.taken = true;
@@ -380,10 +481,22 @@ export function createWorld() {
         events |= EVENT_COIN;
       }
     }
-    if (!state.gemTaken && Math.hypot(thief.x - GEM.x, thief.y - GEM.y) < thief.radius + GEM.radius) {
-      state.gemTaken = true;
-      state.loot += 100;
-      events |= EVENT_GEM;
+    for (const item of loot) {
+      if (!item.taken && Math.hypot(thief.x - item.x, thief.y - item.y) < thief.radius + 16) {
+        item.taken = true;
+        state.loot += item.value;
+        state.message = `${item.name} pocketed — $${item.value}!`;
+        state.messageTime = 1.8;
+        events |= EVENT_LOOT;
+      }
+    }
+    // Reaching the sapphire case starts the crack: the gem only comes out once
+    // the tumblers fall, and the thief's hands are busy until then.
+    if (!state.gemTaken && !state.crack && Math.hypot(thief.x - GEM.x, thief.y - GEM.y) < thief.radius + GEM.radius) {
+      state.crack = newCrack();
+      state.message = 'Cracking the case — press SPACE in the gold zone!';
+      state.messageTime = 2.4;
+      events |= EVENT_CRACK;
     }
 
     // The getaway: gem in hand, reach the green exit door.
@@ -398,5 +511,5 @@ export function createWorld() {
   }
 
   reset();
-  return { state, reset, step, useTool };
+  return { state, reset, step, useTool, crackAttempt };
 }

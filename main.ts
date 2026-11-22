@@ -5,10 +5,12 @@
 // screenshots/ from beside this file to /output and writes /output/dossier.json, the
 // summary the judge reads, with the vendored make.fun library.
 //
-// Cross the museum floor past three patrolling guards and two sweeping cameras,
-// steal the Starlight Sapphire from the vault, and slip out the green exit before
-// the alarm meter fills. Tools cost coins: Smoke breaks line of sight, EMP freezes
-// the cameras, Disguise fools the guards.
+// Cross the museum floor past three patrolling guards (slow, fast, steady), a
+// turning lookout and two sweeping cameras, cross the sweeping laser grid,
+// loot the galleries, crack the sapphire case in a timing minigame, and slip
+// out the green exit while the alarm climbs and the guards hurry. Tools cost
+// coins: Smoke breaks line of sight, EMP freezes the cameras, Disguise fools
+// the guards.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:

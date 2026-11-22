@@ -5,8 +5,8 @@
 // door, the thief, the smoke, then the HUD (alarm meter, coins, tool buttons) and the
 // screen panels.
 
-import { ALARM, CAMERA, EXIT, FIELD, FONT, GUARD, PALETTE, TOOLS } from './config.js';
-import { COVER, GEM as GEM_POS, SOLIDS } from './world.js';
+import { ALARM, CAMERA, CRACK, EXIT, FIELD, FONT, GUARD, LASERS, LOOKOUT, PALETTE, TOOLS } from './config.js';
+import { COVER, GEM as GEM_POS, SOLIDS, laserY } from './world.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
@@ -139,7 +139,7 @@ export function createRenderer(canvas) {
     context.fillStyle = PALETTE.exit;
     context.fillRect(EXIT.x, EXIT.y - 8, EXIT.width, 10);
     context.fillStyle = '#eef1f5';
-    text('EXIT', EXIT.x + EXIT.width / 2, EXIT.y - 14, 16, PALETTE.exit, 'center');
+    text('EXIT', EXIT.x + EXIT.width / 2, EXIT.y - 20, 16, PALETTE.exit, 'center');
     // Coins.
     for (const coin of state.coins) {
       if (coin.taken) continue;
@@ -151,6 +151,29 @@ export function createRenderer(canvas) {
       context.beginPath();
       context.arc(coin.x, coin.y, 5, 0, Math.PI * 2);
       context.fill();
+    }
+    // The gallery loot: each piece has its own colour and value.
+    for (const item of state.lootItems) {
+      if (item.taken) continue;
+      const pulse = 0.75 + 0.25 * Math.sin(state.elapsed * 3 + item.x);
+      context.fillStyle = item.color;
+      context.globalAlpha = 0.25 * pulse;
+      context.beginPath();
+      context.arc(item.x, item.y, 26, 0, Math.PI * 2);
+      context.fill();
+      context.globalAlpha = 1;
+      context.beginPath();
+      context.moveTo(item.x, item.y - 12);
+      context.lineTo(item.x + 12, item.y);
+      context.lineTo(item.x, item.y + 12);
+      context.lineTo(item.x - 12, item.y);
+      context.closePath();
+      context.fill();
+      context.fillStyle = '#11141b';
+      context.beginPath();
+      context.arc(item.x, item.y, 4, 0, Math.PI * 2);
+      context.fill();
+      text(`${item.name} $${item.value}`, item.x, item.y + 34, 13, item.color, 'center');
     }
     // The Starlight Sapphire in its vault.
     if (!state.gemTaken) {
@@ -177,15 +200,19 @@ export function createRenderer(canvas) {
 
   function drawGuards(state) {
     for (const guard of state.guards) {
-      drawCone(guard.x, guard.y, guard.facing, GUARD.sight, GUARD.halfCone, PALETTE.guardCone, PALETTE.guardConeEdge);
+      const sight = guard.lookout ? LOOKOUT.sight : GUARD.sight;
+      const halfCone = guard.lookout ? LOOKOUT.halfCone : GUARD.halfCone;
+      const fill = guard.lookout ? 'rgba(192, 132, 252, 0.18)' : PALETTE.guardCone;
+      const edge = guard.lookout ? 'rgba(192, 132, 252, 0.55)' : PALETTE.guardConeEdge;
+      drawCone(guard.x, guard.y, guard.facing, sight, halfCone, fill, edge);
     }
     for (const guard of state.guards) {
-      context.fillStyle = PALETTE.guard;
+      context.fillStyle = guard.lookout ? PALETTE.lookout : PALETTE.guard;
       context.beginPath();
       context.arc(guard.x, guard.y, guard.radius, 0, Math.PI * 2);
       context.fill();
       // The guard's cap brim points where it looks.
-      context.fillStyle = '#7a1f1a';
+      context.fillStyle = guard.lookout ? '#f2c94c' : '#7a1f1a';
       context.beginPath();
       context.arc(guard.x + Math.cos(guard.facing) * 8, guard.y + Math.sin(guard.facing) * 8, 6, 0, Math.PI * 2);
       context.fill();
@@ -194,6 +221,39 @@ export function createRenderer(canvas) {
       context.arc(guard.x - 4, guard.y - 4, 2, 0, Math.PI * 2);
       context.arc(guard.x + 4, guard.y - 4, 2, 0, Math.PI * 2);
       context.fill();
+      if (guard.lookout) {
+        context.strokeStyle = PALETTE.gold;
+        context.lineWidth = 2;
+        context.beginPath();
+        context.arc(guard.x, guard.y, guard.radius + 5, 0, Math.PI * 2);
+        context.stroke();
+        text('LOOKOUT', guard.x, guard.y - 26, 11, PALETTE.lookout, 'center');
+      }
+    }
+  }
+
+  /** The laser grid: two glowing beams sweeping the central hall, with posts. */
+  function drawLasers(state) {
+    for (let index = 0; index < LASERS.length; index += 1) {
+      const beam = LASERS[index];
+      const y = laserY(index, state.elapsed);
+      context.strokeStyle = PALETTE.laserGlow;
+      context.lineWidth = 12;
+      context.beginPath();
+      context.moveTo(beam.x1, y);
+      context.lineTo(beam.x2, y);
+      context.stroke();
+      context.strokeStyle = PALETTE.laser;
+      context.lineWidth = 3;
+      context.beginPath();
+      context.moveTo(beam.x1, y);
+      context.lineTo(beam.x2, y);
+      context.stroke();
+      // The emitter posts ride the beam's ends.
+      for (const x of [beam.x1, beam.x2]) {
+        context.fillStyle = '#ff8fa3';
+        context.fillRect(x - 4, y - 8, 8, 16);
+      }
     }
   }
 
@@ -265,6 +325,74 @@ export function createRenderer(canvas) {
     context.fill();
   }
 
+  /** The vault-cracking dial: a bar, the gold zone, the sweeping needle. */
+  function drawCrack(state) {
+    const crack = state.crack;
+    if (!crack) return;
+    const bar = { x: 460, y: 556, width: 360, height: 26 };
+    text('CRACK THE CASE — press SPACE when the needle is in the gold zone!', FIELD.width / 2, bar.y - 14, 18, PALETTE.gold, 'center');
+    context.fillStyle = '#11141b';
+    context.fillRect(bar.x - 3, bar.y - 3, bar.width + 6, bar.height + 6);
+    context.fillStyle = '#2a2f42';
+    context.fillRect(bar.x, bar.y, bar.width, bar.height);
+    context.fillStyle = PALETTE.gold;
+    context.fillRect(bar.x + crack.zoneStart * bar.width, bar.y, (crack.zoneEnd - crack.zoneStart) * bar.width, bar.height);
+    const needleX = bar.x + crack.marker * bar.width;
+    context.fillStyle = '#ffffff';
+    context.fillRect(needleX - 2, bar.y - 6, 4, bar.height + 12);
+    for (let hit = 0; hit < CRACK.hitsNeeded; hit += 1) {
+      context.fillStyle = hit < crack.hits ? PALETTE.gold : '#2a2f42';
+      context.beginPath();
+      context.arc(bar.x + bar.width / 2 - 24 + hit * 24, bar.y + bar.height + 22, 7, 0, Math.PI * 2);
+      context.fill();
+    }
+    text(`${crack.hits} of ${CRACK.hitsNeeded} tumblers`, FIELD.width / 2, bar.y + bar.height + 44, 15, PALETTE.text, 'center');
+  }
+
+  // Pickup sparkles: render-side only, spawned when the loot total jumps.
+  let particles = [];
+  let lastLoot = 0;
+  let lastElapsed = 0;
+
+  function drawParticles(state) {
+    const dt = Math.max(0, state.elapsed - lastElapsed);
+    lastElapsed = state.elapsed;
+    if (state.loot > lastLoot) {
+      for (let index = 0; index < 16; index += 1) {
+        const angle = (index / 16) * Math.PI * 2;
+        particles.push({
+          x: state.thief.x, y: state.thief.y,
+          vx: Math.cos(angle) * (60 + (index % 5) * 22),
+          vy: Math.sin(angle) * (60 + (index % 5) * 22),
+          life: 0.7,
+        });
+      }
+    }
+    lastLoot = state.loot;
+    particles = particles.filter((p) => p.life > 0);
+    for (const p of particles) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt;
+      if (p.life <= 0) continue;
+      context.globalAlpha = Math.max(0, p.life / 0.7);
+      context.fillStyle = PALETTE.gold;
+      context.beginPath();
+      context.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+      context.fill();
+    }
+    context.globalAlpha = 1;
+  }
+
+  /** A dark vignette: the museum feels lit, the edges fall away. */
+  function drawVignette() {
+    const gradient = context.createRadialGradient(640, 360, 260, 640, 360, 760);
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0.42)');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, FIELD.width, FIELD.height);
+  }
+
   function drawHud(state, selectedTool) {
     context.textBaseline = 'top';
     // Coins and loot, top left.
@@ -303,6 +431,18 @@ export function createRenderer(canvas) {
     if (state.emp > 0) { text(`EMP ${state.emp.toFixed(1)}s`, 1240, 620 + line * 20, 15, PALETTE.text, 'right'); line += 1; }
     if (state.disguise > 0) { text(`Disguise ${state.disguise.toFixed(1)}s`, 1240, 620 + line * 20, 15, PALETTE.text, 'right'); line += 1; }
     if (state.gemTaken) text('Gem secured — reach the EXIT!', 1240, 596, 16, PALETTE.gem, 'right');
+    // The objective, top right: what the thief still has to do.
+    const takenPieces = state.lootItems.filter((item) => item.taken).length;
+    let objective;
+    if (state.crack) objective = 'CRACKING — SPACE in the gold zone!';
+    else if (!state.gemTaken) objective = `Loot the galleries ${takenPieces}/3 · then crack the vault`;
+    else objective = 'GETAWAY! Reach the green EXIT!';
+    text(objective, 1240, 36, 16, state.gemTaken ? PALETTE.gold : PALETTE.text, 'right');
+    // The getaway banner, once the sapphire is out.
+    if (state.gemTaken) {
+      const blink = Math.floor(state.elapsed * 4) % 2 === 0;
+      if (blink) text('GETAWAY — RUN FOR THE EXIT!', FIELD.width / 2, 130, 24, PALETTE.gold, 'center');
+    }
     if (state.messageTime > 0) text(state.message, FIELD.width / 2, 96, 18, PALETTE.text, 'center');
   }
 
@@ -326,10 +466,11 @@ export function createRenderer(canvas) {
   }
 
   const TITLE_LINES = [
-    'One museum. Three guards. Two cameras. One sapphire.',
+    'One museum. Four guards, a lookout, two cameras, a laser grid.',
     'Move with WASD or arrows. Read the cones before you move.',
+    'Loot the galleries — Idol $60 · Mask $40 · Necklace $25 — then crack the vault.',
+    'Crack the case: SPACE in the gold zone, three tumblers. Then RUN for the EXIT.',
     'Tools: 1 Smoke ($15) · 2 EMP ($25) · 3 Disguise ($40).',
-    'Grab the Starlight Sapphire, then slip out the green EXIT.',
     '',
   ];
   const PAUSED_LINES = ['The guards will wait for you.'];
@@ -342,15 +483,25 @@ export function createRenderer(canvas) {
     context.fillStyle = PALETTE.backdrop;
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
+    // The world labels use an alphabetic baseline; the HUD sets 'top' for itself.
+    context.textBaseline = 'alphabetic';
+    // Screen shake while spotted: the whole museum jolts.
+    if (state.spotted && screen === SCREEN_PLAY) {
+      context.translate(Math.sin(state.elapsed * 47) * 3, Math.cos(state.elapsed * 39) * 3);
+    }
     drawFloor();
+    drawLasers(state);
     drawGuards(state);
     drawCameras(state);
     drawSolids();
     drawLoot(state);
     drawThief(state);
     drawSmoke(state);
+    drawParticles(state);
+    drawVignette();
+    drawCrack(state);
     if (screen === SCREEN_TITLE) {
-      TITLE_LINES[4] = bestLabel(best);
+      TITLE_LINES[5] = bestLabel(best);
       drawPanel('VELVET VAULT', TITLE_LINES, 'Press Space or click to start the heist');
       return;
     }

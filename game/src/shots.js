@@ -5,8 +5,8 @@
 // and how much closer it gets to its target (the nearest coin, then the sapphire, then
 // the exit), and takes the best. The same seed always gives the same frame.
 
-import { CAMERA, EXIT, FIELD, GUARD, STEP, TOOLS } from './config.js';
-import { COVER, EVENT_CAUGHT, EVENT_WIN, GEM, SOLIDS } from './world.js';
+import { CAMERA, CRACK, EXIT, FIELD, GUARD, LASERS, LOOKOUT, STEP, TOOLS } from './config.js';
+import { COVER, EVENT_CAUGHT, EVENT_WIN, GEM, SOLIDS, laserY } from './world.js';
 import { SCREEN_CAUGHT, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WIN } from './render.js';
 
 const START_SECONDS = 6;
@@ -80,9 +80,13 @@ function blockedAt(x, y) {
 function dangerAt(state, x, y) {
   let danger = 0;
   for (const guard of state.guards) {
+    const sight = guard.lookout ? LOOKOUT.sight : GUARD.sight;
+    const halfCone = guard.lookout ? LOOKOUT.halfCone : GUARD.halfCone;
     const distance = Math.hypot(x - guard.x, y - guard.y);
+    // A disguised thief reads as staff to a guard, unless right on top of it.
+    if (state.disguise > 0 && distance >= TOOLS.disguise.closeRange) continue;
     if (distance < 70) danger += 500;
-    if (distance < GUARD.sight && angleDiff(Math.atan2(y - guard.y, x - guard.x), guard.facing) < GUARD.halfCone) {
+    if (distance < sight && angleDiff(Math.atan2(y - guard.y, x - guard.x), guard.facing) < halfCone) {
       if (!sightBlocked(guard.x, guard.y, x, y)) danger += 1000;
     }
   }
@@ -93,6 +97,11 @@ function dangerAt(state, x, y) {
       if (!sightBlocked(camera.x, camera.y, x, y)) danger += 900;
     }
   }
+  // The laser beams sweep: standing in one's path is as bad as standing in a cone.
+  for (let index = 0; index < LASERS.length; index += 1) {
+    const beam = LASERS[index];
+    if (x > beam.x1 - 10 && x < beam.x2 + 10 && Math.abs(y - laserY(index, state.elapsed)) < 26) danger += 1000;
+  }
   return danger;
 }
 
@@ -100,16 +109,18 @@ function currentTarget(state, tour) {
   if (!state.gemTaken) {
     let best = null;
     let bestDistance = Infinity;
-    for (const coin of state.coins) {
-      if (coin.taken) continue;
-      const distance = Math.hypot(state.thief.x - coin.x, state.thief.y - coin.y);
+    // Coins and gallery loot share the tour: the nearest untaken prize first.
+    for (const prize of state.coins.concat(state.lootItems)) {
+      if (prize.taken) continue;
+      const distance = Math.hypot(state.thief.x - prize.x, state.thief.y - prize.y);
       if (distance < bestDistance) {
         bestDistance = distance;
-        best = coin;
+        best = prize;
       }
     }
-    // On a tour the thief sweeps every coin before the sapphire; otherwise a coin
-    // on the way is worth a detour only when one is close, else head for the gem.
+    // On a tour the thief sweeps every prize before the sapphire; otherwise a
+    // prize on the way is worth a detour only when one is close, else head for
+    // the gem.
     if (tour && best !== null) return best;
     if (best !== null && bestDistance < 260) return best;
     return GEM;
@@ -202,19 +213,26 @@ function routeTarget(state, target) {
   return NAV_POINTS[node];
 }
 
-/** The direction that gets the thief closer to `point` without walking into a cone. */
-function moveToward(state, point) {
+/** The direction that gets the thief closer to `point` without walking into a cone.
+ *  `dangerScale` trades caution for speed: the final dash for the sapphire runs
+ *  hot, because a second in a cone is survivable and a frozen thief is not. */
+function moveToward(state, point, dangerScale = 1) {
   const thief = state.thief;
   // Shorten the step when the point is near, so the pilot does not overshoot it.
   const stride = Math.min(205 * LOOKAHEAD, Math.hypot(point.x - thief.x, point.y - thief.y) + 2);
+  // A thief standing somewhere safe but far from its target never just stands
+  // there: the cones move, and freezing in the open is how you get caught.
+  const hereSafe = dangerAt(state, thief.x, thief.y) === 0;
+  const far = Math.hypot(point.x - thief.x, point.y - thief.y) > 40;
   let bestDirection = DIRECTIONS[8];
   let bestScore = Infinity;
   for (const direction of DIRECTIONS) {
+    if (direction === DIRECTIONS[8] && hereSafe && far) continue;
     const length = Math.hypot(direction.x, direction.y) || 1;
     const x = thief.x + (direction.x / length) * stride;
     const y = thief.y + (direction.y / length) * stride;
     if (x < 30 || x > FIELD.width - 30 || y < 30 || y > FIELD.height - 30) continue;
-    const score = dangerAt(state, x, y) + (blockedAt(x, y) ? 5000 : 0) + Math.hypot(point.x - x, point.y - y);
+    const score = dangerAt(state, x, y) * dangerScale + (blockedAt(x, y) ? 5000 : 0) + Math.hypot(point.x - x, point.y - y);
     if (score < bestScore) {
       bestScore = score;
       bestDirection = direction;
@@ -231,6 +249,13 @@ function autopilot(state, options = {}) {
   const tour = !!options.tour;
   const bold = !!options.bold;
   const thief = state.thief;
+  // Cracking the case: hands on the dial, press only while the needle sits
+  // inside the gold zone.
+  if (state.crack) {
+    const crack = state.crack;
+    const inZone = crack.marker >= crack.zoneStart + 0.01 && crack.marker <= crack.zoneEnd - 0.01;
+    return { direction: DIRECTIONS[8], tool: null, crack: inZone };
+  }
   // A bold pilot lets the alarm run hotter before backing off, which is what puts
   // the meter and the smoke in the play scene.
   const patienceAlarm = bold ? 55 : PATIENCE_ALARM;
@@ -255,20 +280,30 @@ function autopilot(state, options = {}) {
     return { direction: DIRECTIONS[8], tool: null };
   }
   // The vault door is watched whenever a guard's cone covers it: wait on the carpet
-  // at the staging point until the cone sweeps away, then dash for the sapphire.
-  const doorWatched = dangerAt(state, 640, 210) > 0;
+  // at the staging point until the cone sweeps away — or spend the coins on a
+  // Disguise and walk straight past the lookout instead.
+  const doorWatched = state.disguise <= 0 && dangerAt(state, 640, 210) > 0;
   if (!state.gemTaken && doorWatched && thief.y > 230 && currentTarget(state, tour) === GEM) {
+    if (state.coinsHeld >= TOOLS.disguise.cost && state.disguise <= 0) {
+      return { direction: moveToward(state, GEM, 0.25), tool: 'disguise' };
+    }
     return { direction: moveToward(state, { x: 640, y: 430 }), tool: null };
   }
   const target = routeTarget(state, currentTarget(state, tour));
   // Shorten the step when the target is near, so the pilot does not overshoot it.
   const stride = Math.min(205 * LOOKAHEAD, Math.hypot(target.x - thief.x, target.y - thief.y) + 2);
   // On a tour the pilot cuts corners and takes risks a careful thief would not,
-  // which is what puts the alarm meter and the smoke in the play scene.
-  const dangerScale = bold ? 0.1 : 1;
+  // which is what puts the alarm meter and the smoke in the play scene. The
+  // final dash for the sapphire runs hot too: a second in a cone is survivable.
+  const dashing = !state.gemTaken && currentTarget(state, tour) === GEM;
+  const dangerScale = bold ? 0.1 : dashing ? 0.25 : 1;
+  // Same no-freeze rule as moveToward: a safe thief far from its target moves.
+  const hereSafe = dangerAt(state, thief.x, thief.y) === 0;
+  const far = Math.hypot(target.x - thief.x, target.y - thief.y) > 40;
   let bestDirection = DIRECTIONS[8];
   let bestScore = Infinity;
   for (const direction of DIRECTIONS) {
+    if (direction === DIRECTIONS[8] && hereSafe && far) continue;
     const length = Math.hypot(direction.x, direction.y) || 1;
     const x = thief.x + (direction.x / length) * stride;
     const y = thief.y + (direction.y / length) * stride;
@@ -323,7 +358,7 @@ export function stageShot(name, world) {
   let peakSnap = null;
   for (let index = 0; index < limit / STEP; index += 1) {
     const move = autopilot(world.state, mode);
-    outcome = world.step(STEP, move.direction.x, move.direction.y, move.tool, false);
+    outcome = world.step(STEP, move.direction.x, move.direction.y, move.tool, false, move.crack);
     if (keepPeak && world.state.alarm > peakAlarm) {
       peakAlarm = world.state.alarm;
       peakSnap = snapshotState(world.state);
