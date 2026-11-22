@@ -5,7 +5,7 @@
 // and how much closer it gets to its target (the nearest coin, then the sapphire, then
 // the exit), and takes the best. The same seed always gives the same frame.
 
-import { CAMERA, CRACK, EXIT, FIELD, GUARD, LASERS, LOOKOUT, STEP, TOOLS } from './config.js';
+import { CAMERA, CRACK, EXIT, FIELD, GUARD, KEYCARD, LASERS, LOOKOUT, STEP, TOOLS } from './config.js';
 import { COVER, EVENT_CAUGHT, EVENT_WIN, GEM, SOLIDS, laserY } from './world.js';
 import { SCREEN_CAUGHT, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WIN } from './render.js';
 
@@ -80,12 +80,13 @@ function blockedAt(x, y) {
 function dangerAt(state, x, y) {
   let danger = 0;
   for (const guard of state.guards) {
-    const sight = guard.lookout ? LOOKOUT.sight : GUARD.sight;
-    const halfCone = guard.lookout ? LOOKOUT.halfCone : GUARD.halfCone;
+    const sight = guard.sight ?? (guard.lookout ? LOOKOUT.sight : GUARD.sight);
+    const halfCone = guard.halfCone ?? (guard.lookout ? LOOKOUT.halfCone : GUARD.halfCone);
+    const bump = guard.bump ?? GUARD.bump;
     const distance = Math.hypot(x - guard.x, y - guard.y);
     // A disguised thief reads as staff to a guard, unless right on top of it.
     if (state.disguise > 0 && distance >= TOOLS.disguise.closeRange) continue;
-    if (distance < 70) danger += 500;
+    if (distance < bump + 8) danger += 500;
     if (distance < sight && angleDiff(Math.atan2(y - guard.y, x - guard.x), guard.facing) < halfCone) {
       if (!sightBlocked(guard.x, guard.y, x, y)) danger += 1000;
     }
@@ -118,6 +119,13 @@ function currentTarget(state, tour) {
         best = prize;
       }
     }
+    // The vault case stays locked without the keycard, so the keycard comes
+    // before the sapphire — but a prize on the way is still worth the detour.
+    if (!state.keycard) {
+      if (tour && best !== null) return best;
+      if (best !== null && bestDistance < 260) return best;
+      return KEYCARD;
+    }
     // On a tour the thief sweeps every prize before the sapphire; otherwise a
     // prize on the way is worth a detour only when one is close, else head for
     // the gem.
@@ -138,8 +146,14 @@ const NAV_POINTS = [
   { x: 640, y: 250 },
   { x: 340, y: 470 },
   { x: 940, y: 470 },
+  // Junctions just north of the short walls' inner ends: the only way around
+  // them into the upper galleries (keycard, brooch, vase).
+  { x: 340, y: 300 },
+  { x: 940, y: 300 },
   { x: 200, y: 200 },
   { x: 1080, y: 200 },
+  { x: 200, y: 300 },
+  { x: 1110, y: 300 },
   { x: 200, y: 620 },
   { x: 1080, y: 620 },
   { x: 460, y: 260 },
@@ -149,10 +163,12 @@ const NAV_POINTS = [
 ];
 
 /** True when the straight line between two points stays clear of every solid,
- *  with the thief's radius of room to spare. */
+ *  with a little room to spare. The margin is 10, less than the thief's radius:
+ *  the graph only routes, and the step scoring still refuses a landing that
+ *  would clip a wall. */
 function segmentClear(x1, y1, x2, y2) {
   for (const rect of SOLIDS.concat(COVER)) {
-    const inflated = { x: rect.x - 16, y: rect.y - 16, width: rect.width + 32, height: rect.height + 32 };
+    const inflated = { x: rect.x - 10, y: rect.y - 10, width: rect.width + 20, height: rect.height + 20 };
     if (segmentHitsRect(x1, y1, x2, y2, inflated)) return false;
   }
   return true;
@@ -207,7 +223,23 @@ function routeTarget(state, target) {
       }
     }
   }
-  if (previous[goal] < 0) return target;
+  if (previous[goal] < 0) {
+    // No route through the graph: head for the waypoint the thief can reach
+    // that is closest to the target, instead of stalling against the wall
+    // between it and the target.
+    let fallback = null;
+    let fallbackDistance = Infinity;
+    for (let index = 0; index < NAV_POINTS.length; index += 1) {
+      const point = NAV_POINTS[index];
+      if (!segmentClear(state.thief.x, state.thief.y, point.x, point.y)) continue;
+      const distance = Math.hypot(point.x - target.x, point.y - target.y);
+      if (distance < fallbackDistance) {
+        fallbackDistance = distance;
+        fallback = point;
+      }
+    }
+    return fallback ?? target;
+  }
   let node = goal;
   while (previous[node] !== start) node = previous[node];
   return NAV_POINTS[node];
@@ -281,21 +313,23 @@ function autopilot(state, options = {}) {
   }
   // The vault door is watched whenever a guard's cone covers it: wait on the carpet
   // at the staging point until the cone sweeps away — or spend the coins on a
-  // Disguise and walk straight past the lookout instead.
+  // Disguise and walk straight past the lookout instead. The staging point sits
+  // between the laser grid and the vault door, clear of the beams.
   const doorWatched = state.disguise <= 0 && dangerAt(state, 640, 210) > 0;
   if (!state.gemTaken && doorWatched && thief.y > 230 && currentTarget(state, tour) === GEM) {
     if (state.coinsHeld >= TOOLS.disguise.cost && state.disguise <= 0) {
       return { direction: moveToward(state, GEM, 0.25), tool: 'disguise' };
     }
-    return { direction: moveToward(state, { x: 640, y: 430 }), tool: null };
+    return { direction: moveToward(state, { x: 640, y: 350 }, 0.25), tool: null };
   }
   const target = routeTarget(state, currentTarget(state, tour));
   // Shorten the step when the target is near, so the pilot does not overshoot it.
   const stride = Math.min(205 * LOOKAHEAD, Math.hypot(target.x - thief.x, target.y - thief.y) + 2);
   // On a tour the pilot cuts corners and takes risks a careful thief would not,
   // which is what puts the alarm meter and the smoke in the play scene. The
-  // final dash for the sapphire runs hot too: a second in a cone is survivable.
-  const dashing = !state.gemTaken && currentTarget(state, tour) === GEM;
+  // final dash for the sapphire — and for the keycard that unlocks it — runs
+  // hot too: a second in a cone is survivable.
+  const dashing = !state.gemTaken && (currentTarget(state, tour) === GEM || currentTarget(state, tour) === KEYCARD);
   const dangerScale = bold ? 0.1 : dashing ? 0.25 : 1;
   // Same no-freeze rule as moveToward: a safe thief far from its target moves.
   const hereSafe = dangerAt(state, thief.x, thief.y) === 0;

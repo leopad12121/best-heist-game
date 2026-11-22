@@ -1,13 +1,13 @@
 // The heist itself, with no drawing and no browser in it: the museum floor, the thief,
-// the guards on their patrols, the sweeping cameras, the loot, the alarm meter and the
-// tools. step() advances one fixed step and returns what happened as bit flags, so the
-// caller can react without the world knowing about screens or sound.
+// the guards on their patrols, the guard dog, the sweeping cameras, the loot, the
+// alarm meter and the tools. step() advances one fixed step and returns what happened
+// as bit flags, so the caller can react without the world knowing about screens or sound.
 //
 // The floor is one museum hall. Three routes run from the entrance (bottom centre) to
 // the vault (top centre): the left gallery, the central hall past the statue, and the
 // right gallery. Display cases and planters are cover: they block movement and sight.
 
-import { ALARM, CAMERA, COIN_VALUE, CRACK, ESCAPE, EXIT, FIELD, GUARD, LASERS, LOOKOUT, LOOT_ITEMS, START_COINS, THIEF, TOOLS } from './config.js';
+import { ALARM, CAMERA, COIN_VALUE, CRACK, DOG, ESCAPE, EXIT, FIELD, GUARD, INVESTIGATE, KEYCARD, LASERS, LOOKOUT, LOOT_ITEMS, START_COINS, THIEF, TOOLS } from './config.js';
 
 export const EVENT_SPOTTED = 1;
 export const EVENT_CAUGHT = 2;
@@ -17,6 +17,7 @@ export const EVENT_WIN = 16;
 export const EVENT_TOOL = 32;
 export const EVENT_LOOT = 64;
 export const EVENT_CRACK = 128;
+export const EVENT_KEYCARD = 256;
 
 const WALL = 24;
 
@@ -86,9 +87,16 @@ const GUARD_ROUTES = [
   [{ x: 480, y: 260 }, { x: 800, y: 260 }, { x: 800, y: 600 }, { x: 480, y: 600 }],
 ];
 
+// The guard dog's beat: a fast loop around the lower central hall, below the lasers.
+const DOG_ROUTE = [
+  { x: 480, y: 600 }, { x: 800, y: 600 }, { x: 800, y: 540 }, { x: 480, y: 540 },
+];
+
 const CAMERA_SPOTS = [
   { x: 200, y: 40, base: Math.PI / 2 },
   { x: 1080, y: 40, base: Math.PI / 2 },
+  // The third camera watches the red carpet straight down to the vault door.
+  { x: 640, y: 40, base: Math.PI / 2 },
 ];
 
 function rectsOverlap(a, b) {
@@ -170,7 +178,14 @@ export function createWorld(random) {
     speed: GUARD.speeds[index] ?? GUARD.speeds[0],
     facing: index === 2 ? 0 : Math.PI / 2,
     radius: GUARD.radius,
+    sight: GUARD.sight,
+    halfCone: GUARD.halfCone,
+    bump: GUARD.bump,
     lookout: false,
+    dog: false,
+    investigateX: 0,
+    investigateY: 0,
+    investigateTime: 0,
   }));
   // The lookout never walks: it stands by the vault door and turns slowly.
   guards.push({
@@ -181,7 +196,33 @@ export function createWorld(random) {
     speed: 0,
     facing: Math.PI / 2,
     radius: LOOKOUT.radius,
+    sight: LOOKOUT.sight,
+    halfCone: LOOKOUT.halfCone,
+    bump: GUARD.bump,
     lookout: true,
+    dog: false,
+    investigateX: 0,
+    investigateY: 0,
+    investigateTime: 0,
+  });
+  // The guard dog: fast, wide-eyed, keen-nosed — it patrols the lower hall and
+  // smells the thief up close even out of its cone.
+  guards.push({
+    x: DOG_ROUTE[0].x,
+    y: DOG_ROUTE[0].y,
+    leg: 0,
+    route: DOG_ROUTE,
+    speed: DOG.speed,
+    facing: 0,
+    radius: DOG.radius,
+    sight: DOG.sight,
+    halfCone: DOG.halfCone,
+    bump: DOG.bump,
+    lookout: false,
+    dog: true,
+    investigateX: 0,
+    investigateY: 0,
+    investigateTime: 0,
   });
   const cameras = CAMERA_SPOTS.map((spot) => ({
     x: spot.x,
@@ -201,6 +242,7 @@ export function createWorld(random) {
     lootItems: loot,
     gemTaken: false,
     crack: null,
+    keycard: false,
     coinsHeld: START_COINS,
     loot: 0,
     alarm: 0,
@@ -211,6 +253,9 @@ export function createWorld(random) {
     smokeY: 0,
     emp: 0,
     disguise: 0,
+    decoy: 0,
+    decoyX: 0,
+    decoyY: 0,
     elapsed: 0,
     seenBy: '',
     message: '',
@@ -221,10 +266,15 @@ export function createWorld(random) {
     thief.x = THIEF.startX;
     thief.y = THIEF.startY;
     for (let index = 0; index < guards.length; index += 1) {
-      guards[index].x = GUARD_ROUTES[index]?.[0]?.x ?? LOOKOUT.x;
-      guards[index].y = GUARD_ROUTES[index]?.[0]?.y ?? LOOKOUT.y;
-      guards[index].leg = 0;
-      guards[index].facing = index === 2 ? 0 : Math.PI / 2;
+      const guard = guards[index];
+      const start = guard.dog ? DOG_ROUTE[0] : guard.lookout ? { x: LOOKOUT.x, y: LOOKOUT.y } : GUARD_ROUTES[index][0];
+      guard.x = start.x;
+      guard.y = start.y;
+      guard.leg = 0;
+      guard.facing = index === 2 ? 0 : Math.PI / 2;
+      guard.investigateX = 0;
+      guard.investigateY = 0;
+      guard.investigateTime = 0;
     }
     for (const camera of cameras) {
       camera.angle = camera.base;
@@ -235,6 +285,7 @@ export function createWorld(random) {
     for (const item of loot) item.taken = false;
     state.gemTaken = false;
     state.crack = null;
+    state.keycard = false;
     state.coinsHeld = START_COINS;
     state.loot = 0;
     state.alarm = 0;
@@ -243,6 +294,9 @@ export function createWorld(random) {
     state.smoke = 0;
     state.emp = 0;
     state.disguise = 0;
+    state.decoy = 0;
+    state.decoyX = 0;
+    state.decoyY = 0;
     state.elapsed = 0;
     state.seenBy = '';
     state.message = '';
@@ -267,13 +321,14 @@ export function createWorld(random) {
     return segmentBlocked(x, y, thief.x, thief.y);
   }
 
-  /** True when this watcher can see the thief right now. */
-  function canSee(x, y, facing, range, halfCone, isCamera) {
+  /** True when this watcher can see the thief right now. `bump` is the distance
+   *  inside which the watcher spots the thief whatever way it faces (0 for cameras). */
+  function canSee(x, y, facing, range, halfCone, bump) {
     const dx = thief.x - x;
     const dy = thief.y - y;
     const distance = Math.hypot(dx, dy);
     if (distance > range) return false;
-    if (!isCamera && distance < GUARD.bump) return true;
+    if (bump > 0 && distance < bump) return true;
     if (angleDiff(angleTo(x, y, thief.x, thief.y), facing) > halfCone) return false;
     if (thiefHiddenFrom(x, y)) return false;
     return true;
@@ -296,6 +351,11 @@ export function createWorld(random) {
       for (const camera of cameras) camera.frozen = tool.seconds;
     } else if (name === 'disguise') {
       state.disguise = tool.seconds;
+    } else if (name === 'decoy') {
+      // The noisemaker lands where the thief stands: the patrols walk to it.
+      state.decoy = tool.seconds;
+      state.decoyX = thief.x;
+      state.decoyY = thief.y;
     }
     state.message = `${tool.name} used.`;
     state.messageTime = 1.6;
@@ -361,6 +421,7 @@ export function createWorld(random) {
     if (state.smoke > 0) state.smoke = Math.max(0, state.smoke - dt);
     if (state.emp > 0) state.emp = Math.max(0, state.emp - dt);
     if (state.disguise > 0) state.disguise = Math.max(0, state.disguise - dt);
+    if (state.decoy > 0) state.decoy = Math.max(0, state.decoy - dt);
 
     if (tool && !harmless) events |= useTool(tool);
     if (crack && state.crack && !harmless) events |= crackAttempt();
@@ -379,22 +440,35 @@ export function createWorld(random) {
     }
 
     // Guards walk their patrol routes; the lookout turns on the spot. After the
-    // sapphire is out, every guard hurries.
+    // sapphire is out, every guard hurries. A guard that is investigating walks to
+    // the last-seen spot instead, and a live decoy pulls the patrols to where it
+    // landed — both take priority over the route, and neither advances the patrol.
     const haste = state.gemTaken ? ESCAPE.guardHaste : 1;
     for (const guard of guards) {
       if (guard.lookout) {
         guard.facing = (state.elapsed * LOOKOUT.turnSpeed) % (Math.PI * 2);
         continue;
       }
-      const target = guard.route[(guard.leg + 1) % guard.route.length];
+      let target;
+      let stride = guard.speed * haste * dt;
+      let advanceLeg = false;
+      if (guard.investigateTime > 0) {
+        guard.investigateTime = Math.max(0, guard.investigateTime - dt);
+        target = { x: guard.investigateX, y: guard.investigateY };
+        stride *= INVESTIGATE.haste;
+      } else if (state.decoy > 0) {
+        target = { x: state.decoyX, y: state.decoyY };
+      } else {
+        target = guard.route[(guard.leg + 1) % guard.route.length];
+        advanceLeg = true;
+      }
       const gx = target.x - guard.x;
       const gy = target.y - guard.y;
       const distance = Math.hypot(gx, gy);
-      const stride = guard.speed * haste * dt;
       if (distance <= stride) {
         guard.x = target.x;
         guard.y = target.y;
-        guard.leg = (guard.leg + 1) % guard.route.length;
+        if (advanceLeg) guard.leg = (guard.leg + 1) % guard.route.length;
       } else {
         guard.x += (gx / distance) * stride;
         guard.y += (gy / distance) * stride;
@@ -422,11 +496,9 @@ export function createWorld(random) {
       const guard = guards[index];
       const close = Math.hypot(thief.x - guard.x, thief.y - guard.y) < TOOLS.disguise.closeRange;
       const disguised = state.disguise > 0 && !close;
-      const sight = guard.lookout ? LOOKOUT.sight : GUARD.sight;
-      const halfCone = guard.lookout ? LOOKOUT.halfCone : GUARD.halfCone;
-      if (!disguised && canSee(guard.x, guard.y, guard.facing, sight, halfCone, false)) {
+      if (!disguised && canSee(guard.x, guard.y, guard.facing, guard.sight, guard.halfCone, guard.bump)) {
         seen = true;
-        seenBy = guard.lookout ? 'Lookout' : `Guard ${index + 1}`;
+        seenBy = guard.lookout ? 'Lookout' : guard.dog ? 'Guard dog' : `Guard ${index + 1}`;
         break;
       }
     }
@@ -434,7 +506,7 @@ export function createWorld(random) {
       for (let index = 0; index < cameras.length; index += 1) {
         const camera = cameras[index];
         if (camera.frozen > 0) continue;
-        if (canSee(camera.x, camera.y, camera.angle, CAMERA.sight, CAMERA.halfCone, true)) {
+        if (canSee(camera.x, camera.y, camera.angle, CAMERA.sight, CAMERA.halfCone, 0)) {
           seen = true;
           seenBy = `Camera ${index + 1}`;
           break;
@@ -461,6 +533,23 @@ export function createWorld(random) {
     if (state.alarm >= ALARM.warn && !state.spotted) {
       state.spotted = true;
       events |= EVENT_SPOTTED;
+      // The nearest patrolling guard (the dog included) breaks off to investigate
+      // where the thief was last seen.
+      let nearest = null;
+      let nearestDistance = Infinity;
+      for (const guard of guards) {
+        if (guard.lookout) continue;
+        const distance = Math.hypot(thief.x - guard.x, thief.y - guard.y);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearest = guard;
+        }
+      }
+      if (nearest) {
+        nearest.investigateX = thief.x;
+        nearest.investigateY = thief.y;
+        nearest.investigateTime = INVESTIGATE.seconds;
+      }
     }
     if (state.alarm >= ALARM.max) {
       state.grace += dt;
@@ -490,13 +579,28 @@ export function createWorld(random) {
         events |= EVENT_LOOT;
       }
     }
+    // The Security Keycard, kept in the guard office in the left gallery.
+    if (!state.keycard && Math.hypot(thief.x - KEYCARD.x, thief.y - KEYCARD.y) < thief.radius + 16) {
+      state.keycard = true;
+      state.message = 'Security Keycard pocketed — the vault case will open now!';
+      state.messageTime = 1.8;
+      events |= EVENT_KEYCARD;
+    }
     // Reaching the sapphire case starts the crack: the gem only comes out once
-    // the tumblers fall, and the thief's hands are busy until then.
+    // the tumblers fall, and the thief's hands are busy until then. Without the
+    // keycard the case stays locked.
     if (!state.gemTaken && !state.crack && Math.hypot(thief.x - GEM.x, thief.y - GEM.y) < thief.radius + GEM.radius) {
-      state.crack = newCrack();
-      state.message = 'Cracking the case — press SPACE in the gold zone!';
-      state.messageTime = 2.4;
-      events |= EVENT_CRACK;
+      if (!state.keycard) {
+        if (state.messageTime <= 0) {
+          state.message = 'Locked — the vault case needs the Security Keycard.';
+          state.messageTime = 1.2;
+        }
+      } else {
+        state.crack = newCrack();
+        state.message = 'Cracking the case — press SPACE in the gold zone!';
+        state.messageTime = 2.4;
+        events |= EVENT_CRACK;
+      }
     }
 
     // The getaway: gem in hand, reach the green exit door.

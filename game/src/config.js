@@ -26,6 +26,26 @@ export const GUARD = {
   bump: 46,
 };
 
+/** The guard dog: fast, keen-nosed, short-sighted but wide-eyed. It cannot see
+ *  far, but its cone is wide and it smells the thief up close. */
+export const DOG = {
+  radius: 12,
+  speed: 130,
+  sight: 135,
+  halfCone: 1.1,
+  /** The dog smells the thief inside this distance, cone or no cone. */
+  bump: 62,
+};
+
+/** A guard that just spotted the thief investigates the last-seen spot: it walks
+ *  there, looks around, then goes back to its patrol. */
+export const INVESTIGATE = {
+  /** Seconds a guard spends investigating before giving up. */
+  seconds: 5,
+  /** Speed multiplier while investigating. */
+  haste: 1.0,
+};
+
 /** The stationary lookout by the vault door: never walks, slowly turns a full
  *  circle, and sees further than a patrolling guard. */
 export const LOOKOUT = {
@@ -44,7 +64,14 @@ export const LOOT_ITEMS = [
   { name: 'Gold Idol', x: 170, y: 620, value: 60, color: '#f2c94c' },
   { name: 'Jade Mask', x: 1110, y: 620, value: 40, color: '#4ade80' },
   { name: 'Pearl Necklace', x: 1080, y: 200, value: 25, color: '#f0e6ff' },
+  { name: 'Ruby Brooch', x: 170, y: 200, value: 35, color: '#f87171' },
+  { name: 'Ancient Vase', x: 1110, y: 300, value: 30, color: '#fbbf24' },
 ];
+
+/** The Security Keycard, kept in the guard office in the left gallery — up in the
+ *  corner by the display case, off the patrolling guard's beat. The vault case
+ *  stays locked until the thief pockets it. */
+export const KEYCARD = { x: 270, y: 180 };
 
 /** The laser grid across the central hall: two beams that sweep up and down.
  *  Crossing a beam trips the alarm hard. */
@@ -97,6 +124,9 @@ export const TOOLS = {
   smoke: { name: 'Smoke', cost: 15, key: '1', radius: 115, seconds: 4 },
   emp: { name: 'EMP', cost: 25, key: '2', seconds: 6 },
   disguise: { name: 'Disguise', cost: 40, key: '3', seconds: 8, closeRange: 72 },
+  /** Decoy: a thrown noisemaker. The nearest patrolling guard and the dog walk
+   *  to where it lands and look around, giving the thief a clear corridor. */
+  decoy: { name: 'Decoy', cost: 20, key: '4', seconds: 6 },
 };
 
 export const COIN_VALUE = 10;
@@ -121,6 +151,11 @@ export const PALETTE = {
   guard: '#e5534b',
   guardCone: 'rgba(229, 83, 75, 0.20)',
   guardConeEdge: 'rgba(229, 83, 75, 0.55)',
+  dog: '#b45309',
+  dogCone: 'rgba(180, 83, 9, 0.20)',
+  dogConeEdge: 'rgba(180, 83, 9, 0.55)',
+  decoy: '#fbbf24',
+  keycard: '#38bdf8',
   camera: '#f2c94c',
   cameraCone: 'rgba(242, 201, 76, 0.16)',
   cameraConeEdge: 'rgba(242, 201, 76, 0.5)',

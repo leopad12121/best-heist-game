@@ -12,7 +12,7 @@ const LEFT = new Set(['ArrowLeft', 'KeyA']);
 const RIGHT = new Set(['ArrowRight', 'KeyD']);
 const CONFIRM = new Set(['Space', 'Enter']);
 const PAUSE = new Set(['KeyP', 'Escape']);
-const TOOL_KEYS = { Digit1: 'smoke', Digit2: 'emp', Digit3: 'disguise' };
+const TOOL_KEYS = { Digit1: 'smoke', Digit2: 'emp', Digit3: 'disguise', Digit4: 'decoy' };
 
 export function createInput(target) {
   const held = { up: false, down: false, left: false, right: false };

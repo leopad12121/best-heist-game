@@ -5,7 +5,7 @@
 // door, the thief, the smoke, then the HUD (alarm meter, coins, tool buttons) and the
 // screen panels.
 
-import { ALARM, CAMERA, CRACK, EXIT, FIELD, FONT, GUARD, LASERS, LOOKOUT, PALETTE, TOOLS } from './config.js';
+import { ALARM, CAMERA, CRACK, EXIT, FIELD, FONT, GUARD, KEYCARD, LASERS, LOOKOUT, PALETTE, TOOLS } from './config.js';
 import { COVER, GEM as GEM_POS, SOLIDS, laserY } from './world.js';
 
 export const SCREEN_TITLE = 'title';
@@ -19,12 +19,13 @@ export const TOOL_BUTTONS = [
   { name: 'smoke', x: 40, y: 648, width: 150, height: 36 },
   { name: 'emp', x: 200, y: 648, width: 150, height: 36 },
   { name: 'disguise', x: 360, y: 648, width: 150, height: 36 },
+  { name: 'decoy', x: 520, y: 648, width: 150, height: 36 },
 ];
 
 const PANEL = { width: 640, top: 150, line: 32, bottom: 76 };
 const ALARM_BAR = { x: 480, y: 40, width: 320, height: 20 };
 
-const TOOL_ORDER = ['smoke', 'emp', 'disguise'];
+const TOOL_ORDER = ['smoke', 'emp', 'disguise', 'decoy'];
 
 function cachedLabel(prefix) {
   let value = -1;
@@ -175,6 +176,22 @@ export function createRenderer(canvas) {
       context.fill();
       text(`${item.name} $${item.value}`, item.x, item.y + 34, 13, item.color, 'center');
     }
+    // The Security Keycard in the guard office, left gallery.
+    if (!state.keycard) {
+      const pulse = 0.75 + 0.25 * Math.sin(state.elapsed * 3 + 1);
+      context.globalAlpha = 0.3 * pulse;
+      context.fillStyle = PALETTE.keycard;
+      context.beginPath();
+      context.arc(KEYCARD.x, KEYCARD.y, 24, 0, Math.PI * 2);
+      context.fill();
+      context.globalAlpha = 1;
+      context.fillStyle = PALETTE.keycard;
+      context.fillRect(KEYCARD.x - 13, KEYCARD.y - 9, 26, 18);
+      context.fillStyle = '#0d0f16';
+      context.fillRect(KEYCARD.x - 9, KEYCARD.y - 5, 10, 4);
+      context.fillRect(KEYCARD.x - 9, KEYCARD.y + 2, 14, 4);
+      text('KEYCARD', KEYCARD.x, KEYCARD.y + 32, 12, PALETTE.keycard, 'center');
+    }
     // The Starlight Sapphire in its vault.
     if (!state.gemTaken) {
       const pulse = 0.7 + 0.3 * Math.sin(state.elapsed * 4);
@@ -200,19 +217,23 @@ export function createRenderer(canvas) {
 
   function drawGuards(state) {
     for (const guard of state.guards) {
-      const sight = guard.lookout ? LOOKOUT.sight : GUARD.sight;
-      const halfCone = guard.lookout ? LOOKOUT.halfCone : GUARD.halfCone;
-      const fill = guard.lookout ? 'rgba(192, 132, 252, 0.18)' : PALETTE.guardCone;
-      const edge = guard.lookout ? 'rgba(192, 132, 252, 0.55)' : PALETTE.guardConeEdge;
+      const sight = guard.sight ?? (guard.lookout ? LOOKOUT.sight : GUARD.sight);
+      const halfCone = guard.halfCone ?? (guard.lookout ? LOOKOUT.halfCone : GUARD.halfCone);
+      const fill = guard.lookout
+        ? 'rgba(192, 132, 252, 0.18)'
+        : guard.dog ? PALETTE.dogCone : PALETTE.guardCone;
+      const edge = guard.lookout
+        ? 'rgba(192, 132, 252, 0.55)'
+        : guard.dog ? PALETTE.dogConeEdge : PALETTE.guardConeEdge;
       drawCone(guard.x, guard.y, guard.facing, sight, halfCone, fill, edge);
     }
     for (const guard of state.guards) {
-      context.fillStyle = guard.lookout ? PALETTE.lookout : PALETTE.guard;
+      context.fillStyle = guard.lookout ? PALETTE.lookout : guard.dog ? PALETTE.dog : PALETTE.guard;
       context.beginPath();
       context.arc(guard.x, guard.y, guard.radius, 0, Math.PI * 2);
       context.fill();
       // The guard's cap brim points where it looks.
-      context.fillStyle = guard.lookout ? '#f2c94c' : '#7a1f1a';
+      context.fillStyle = guard.lookout ? '#f2c94c' : guard.dog ? '#3f2d12' : '#7a1f1a';
       context.beginPath();
       context.arc(guard.x + Math.cos(guard.facing) * 8, guard.y + Math.sin(guard.facing) * 8, 6, 0, Math.PI * 2);
       context.fill();
@@ -228,6 +249,11 @@ export function createRenderer(canvas) {
         context.arc(guard.x, guard.y, guard.radius + 5, 0, Math.PI * 2);
         context.stroke();
         text('LOOKOUT', guard.x, guard.y - 26, 11, PALETTE.lookout, 'center');
+      }
+      if (guard.dog) text('DOG', guard.x, guard.y - 24, 11, PALETTE.dog, 'center');
+      // An investigating guard is on the hunt: a "!" over its head.
+      if (guard.investigateTime > 0) {
+        text('!', guard.x, guard.y - (guard.dog ? 40 : 22), 20, '#fbbf24', 'center');
       }
     }
   }
@@ -323,6 +349,22 @@ export function createRenderer(canvas) {
     context.arc(state.smokeX + 34, state.smokeY - 18, 26, 0, Math.PI * 2);
     context.arc(state.smokeX + 10, state.smokeY + 34, 20, 0, Math.PI * 2);
     context.fill();
+  }
+
+  /** The decoy noisemaker: a pulsing ring where it landed, pulling the patrols in. */
+  function drawDecoy(state) {
+    if (state.decoy <= 0) return;
+    const pulse = 10 + 4 * Math.sin(state.elapsed * 8);
+    context.strokeStyle = PALETTE.decoy;
+    context.lineWidth = 2;
+    context.beginPath();
+    context.arc(state.decoyX, state.decoyY, pulse + 8, 0, Math.PI * 2);
+    context.stroke();
+    context.fillStyle = PALETTE.decoy;
+    context.beginPath();
+    context.arc(state.decoyX, state.decoyY, 5, 0, Math.PI * 2);
+    context.fill();
+    text('DECOY', state.decoyX, state.decoyY - 22, 12, PALETTE.decoy, 'center');
   }
 
   /** The vault-cracking dial: a bar, the gold zone, the sweeping needle. */
@@ -430,14 +472,26 @@ export function createRenderer(canvas) {
     if (state.smoke > 0) { text(`Smoke ${state.smoke.toFixed(1)}s`, 1240, 620 + line * 20, 15, PALETTE.text, 'right'); line += 1; }
     if (state.emp > 0) { text(`EMP ${state.emp.toFixed(1)}s`, 1240, 620 + line * 20, 15, PALETTE.text, 'right'); line += 1; }
     if (state.disguise > 0) { text(`Disguise ${state.disguise.toFixed(1)}s`, 1240, 620 + line * 20, 15, PALETTE.text, 'right'); line += 1; }
+    if (state.decoy > 0) { text(`Decoy ${state.decoy.toFixed(1)}s`, 1240, 620 + line * 20, 15, PALETTE.text, 'right'); line += 1; }
     if (state.gemTaken) text('Gem secured — reach the EXIT!', 1240, 596, 16, PALETTE.gem, 'right');
     // The objective, top right: what the thief still has to do.
     const takenPieces = state.lootItems.filter((item) => item.taken).length;
     let objective;
     if (state.crack) objective = 'CRACKING — SPACE in the gold zone!';
-    else if (!state.gemTaken) objective = `Loot the galleries ${takenPieces}/3 · then crack the vault`;
+    else if (!state.keycard) objective = 'Find the KEYCARD in the left gallery';
+    else if (!state.gemTaken) objective = `Loot the galleries ${takenPieces}/5 · then crack the vault`;
     else objective = 'GETAWAY! Reach the green EXIT!';
     text(objective, 1240, 36, 16, state.gemTaken ? PALETTE.gold : PALETTE.text, 'right');
+    // The heist checklist, top right under the objective.
+    const checklist = [
+      { done: state.keycard, label: 'Keycard' },
+      { done: takenPieces >= state.lootItems.length, label: `Loot ${takenPieces}/${state.lootItems.length}` },
+      { done: state.gemTaken, label: 'Sapphire' },
+      { done: false, label: 'Exit' },
+    ];
+    checklist.forEach((item, index) => {
+      text(`${item.done ? '✓' : '○'} ${item.label}`, 1240, 60 + index * 20, 14, item.done ? PALETTE.gold : PALETTE.muted, 'right');
+    });
     // The getaway banner, once the sapphire is out.
     if (state.gemTaken) {
       const blink = Math.floor(state.elapsed * 4) % 2 === 0;
@@ -466,11 +520,13 @@ export function createRenderer(canvas) {
   }
 
   const TITLE_LINES = [
-    'One museum. Four guards, a lookout, two cameras, a laser grid.',
+    'One museum. Three guards, a guard dog, a lookout, three cameras, a laser grid.',
     'Move with WASD or arrows. Read the cones before you move.',
-    'Loot the galleries — Idol $60 · Mask $40 · Necklace $25 — then crack the vault.',
+    'First the KEYCARD in the left gallery — the vault case stays locked without it.',
+    'Loot the galleries — Idol $60 · Mask $40 · Brooch $35 · Vase $30 · Necklace $25 — then crack the vault.',
     'Crack the case: SPACE in the gold zone, three tumblers. Then RUN for the EXIT.',
-    'Tools: 1 Smoke ($15) · 2 EMP ($25) · 3 Disguise ($40).',
+    'Tools: 1 Smoke ($15) · 2 EMP ($25) · 3 Disguise ($40) · 4 Decoy ($20).',
+    'Spotted? A guard breaks off to investigate where it last saw you.',
     '',
   ];
   const PAUSED_LINES = ['The guards will wait for you.'];
@@ -497,11 +553,12 @@ export function createRenderer(canvas) {
     drawLoot(state);
     drawThief(state);
     drawSmoke(state);
+    drawDecoy(state);
     drawParticles(state);
     drawVignette();
     drawCrack(state);
     if (screen === SCREEN_TITLE) {
-      TITLE_LINES[5] = bestLabel(best);
+      TITLE_LINES[7] = bestLabel(best);
       drawPanel('VELVET VAULT', TITLE_LINES, 'Press Space or click to start the heist');
       return;
     }

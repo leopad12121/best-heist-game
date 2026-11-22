@@ -5,12 +5,14 @@
 // ?seed=N fixes the run. ?shot=start|play|end (with &seed=N) stages that scene instead
 // of running the loop, paints it twice and sets window.__shotReady for a screenshot.
 //
-// Tools: press 1 (Smoke), 2 (EMP) or 3 (Disguise) to pick one, then Space or a click
-// anywhere to use it; clicking a tool button in the HUD picks and uses it at once.
+// Tools: press 1 (Smoke), 2 (EMP), 3 (Disguise) or 4 (Decoy) to pick one, then Space
+// or a click anywhere to use it; clicking a tool button in the HUD picks and uses
+// it at once. First pocket the Security Keycard in the left gallery: the vault case
+// stays locked without it.
 
 import { BEST_KEY, STEP } from './config.js';
 import { createRandom } from './random.js';
-import { createWorld, EVENT_CAUGHT, EVENT_COIN, EVENT_CRACK, EVENT_GEM, EVENT_LOOT, EVENT_SPOTTED, EVENT_WIN } from './world.js';
+import { createWorld, EVENT_CAUGHT, EVENT_COIN, EVENT_CRACK, EVENT_GEM, EVENT_KEYCARD, EVENT_LOOT, EVENT_SPOTTED, EVENT_WIN } from './world.js';
 import { ACTION_CONFIRM, ACTION_PAUSE, createInput } from './input.js';
 import { createRenderer, SCREEN_CAUGHT, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WIN, TOOL_BUTTONS } from './render.js';
 import { stageShot } from './shots.js';
@@ -146,6 +148,7 @@ function runGame() {
     else if (events & EVENT_CAUGHT) endGame(false);
     else if (events & EVENT_SPOTTED) announce(`Spotted by ${world.state.seenBy}! Break line of sight!`);
     else if (events & EVENT_CRACK) announce(world.state.message);
+    else if (events & EVENT_KEYCARD) announce(world.state.message);
     else if (events & EVENT_GEM) announce('Sapphire secured! Reach the exit — the alarm is climbing!');
     else if (events & EVENT_LOOT) announce(world.state.message);
     else if (events & EVENT_COIN) announce(`Coin. $${world.state.loot} loot.`);
